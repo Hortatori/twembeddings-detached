@@ -9,6 +9,10 @@ import yaml
 import argparse
 import csv
 # from sklearn.cluster import DBSCAN
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.metrics.pairwise import cosine_distances
+import numpy as np
+
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s : %(message)s', level=logging.INFO)
 text_embeddings = ['tfidf_dataset', 'tfidf_all_tweets', 'w2v_gnews_en', "elmo", "bert", "sbert", "use"]
@@ -81,6 +85,9 @@ def main(args):
 
 
 def test_params(**params):
+    # ADDED params daily and cluster_test : for now, you need to change locally for testing clustering by day
+    daily = False
+    cluster_test = False
     X, data = build_matrix(**params)
     params["window"] = int(data.groupby("date").size().mean()*params["window"]/24// params["batch_size"] * params["batch_size"])
     logging.info("window size: {}".format(params["window"]))
@@ -90,17 +97,29 @@ def test_params(**params):
     thresholds = params.pop("threshold")
     for t in thresholds:
         logging.info("threshold: {}".format(t))
-        # clustering = DBSCAN(eps=t, metric=params["distance"], min_samples=params["min_samples"]).fit(X)
+        logging.info("test cluster is {}".format(cluster_test))
+        # clustering = DBSCAN(eps=t, metric=params["distance"], min_samples=params["min_samples"]).fit(X)        
         if params["model"].startswith("tfidf") and params["distance"] == "cosine":
             clustering = ClusteringAlgoSparse(threshold=float(t), window_size=params["window"],
                                               batch_size=params["batch_size"], intel_mkl=False)
+            clustering.add_vectors(X)
+        # added an if condition for testing cluster type
+        if cluster_test :
+            logging.info("trying test clustering")
+            logging.info("successed to test clustering")
         else:
             clustering = ClusteringAlgo(threshold=float(t), window_size=params["window"],
                                         batch_size=params["batch_size"],
                                         distance=params["distance"])
-        clustering.add_vectors(X)
-        y_pred = clustering.incremental_clustering()
-        # y_pred = clustering.labels_
+            clustering.add_vectors(X)
+
+        # ADDED an if condition for y_pred in cluster testing
+        if cluster_test :
+            logging.info("displaying clustering labels")
+            y_pred = clustering.labels_ 
+        else :
+            y_pred = clustering.incremental_clustering()
+
         stats = general_statistics(y_pred)
         p, r, f1 = cluster_event_match(data, y_pred)
         ami = adjusted_mutual_info_score(data.label, y_pred)
@@ -112,11 +131,21 @@ def test_params(**params):
         for rc in candidate_columns:
             if rc in data.columns:
                 result_columns.append(rc)
-        data[result_columns].to_csv(params["dataset"].replace(".", "_results."),
-                                    index=False,
-                                    sep="\t",
-                                    quoting=csv.QUOTE_NONE
-                                    )
+
+        # MODIF ajout d'une condition if pour envoyer les résultats / jour dans un fichier dédié
+        if cluster_test and daily:
+            # MODIF : crée un fichier dédié à l'agglomerative clustering et les scores/jours avec les labels predits + les clusters pour chaque tweet.
+            data[result_columns].to_csv(params["dataset"].replace(".", "_results_daily."),
+                                        index=False,
+                                        sep="\t",
+                                        quoting=csv.QUOTE_NONE
+                                        )
+        else :
+            data[result_columns].to_csv(params["dataset"].replace(".", "_results."),
+                                        index=False,
+                                        sep="\t",
+                                        quoting=csv.QUOTE_NONE
+                                        )
         try:
             mcp, mcr, mcf1 = mcminn_eval(data, y_pred)
         except ZeroDivisionError as error:
@@ -125,15 +154,30 @@ def test_params(**params):
         stats.update({"t": t, "p": p, "r": r, "f1": f1, "mcp": mcp, "mcr": mcr, "mcf1": mcf1, "ami": ami, "ari": ari})
         stats.update(params)
         stats = pd.DataFrame(stats, index=[0])
-        logging.info(stats[["t", "model", "tfidf_weights", "p", "r", "f1", "ami", "ari"]].iloc[0])
+
+        # ADDED : date of the run when csv saves
+        stats['datetime_of_run'] = pd.Timestamp.today().strftime('%Y-%m-%d-%H-%M')
+
+        logging.info(stats[["t", "model", "tfidf_weights", "p", "r", "f1"]].iloc[0])
         if params["save_results"]:
-            try:
-                results = pd.read_csv("results_clustering.csv")
-            except FileNotFoundError:
-                results = pd.DataFrame()
-            stats = pd.concat([results, stats], ignore_index=True)
-            stats.to_csv("results_clustering.csv", index=False)
-            logging.info("Saved results to results_clustering.csv")
+            # ADDED update a scores/day file with new daily stats
+            if cluster_test and daily:
+            # commenter pour ne pas avoir un fichier historique de tous les runs AggloC
+                # try:
+                #     results = pd.read_csv("results_daily_cluster_tests.csv")
+                # except FileNotFoundError:
+                #     results = pd.DataFrame()
+                # stats = pd.concat([results, stats], ignore_index=True)
+                stats.to_csv("results_daily_cluster_tests.csv", index=False)
+                logging.info("Saved results to results_daily_cluster_tests.csv")
+            else :
+                try:
+                    results = pd.read_csv("results_clustering.csv")
+                except FileNotFoundError:
+                    results = pd.DataFrame()
+                stats = pd.concat([results, stats], ignore_index=True)
+                stats.to_csv("results_clustering.csv", index=False)
+                logging.info("Saved results to results_clustering.csv")
 
 
 if __name__ == '__main__':

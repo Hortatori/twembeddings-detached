@@ -1,0 +1,15 @@
+gensim
+numpy
+pandas
+protobuf==3.20.3
+pytorch-transformers
+scikit-learn>=1.3
+scipy
+sentence-transformers
+tensorflow>=2.13.0
+tensorflow_text>=2.13.0
+tqdm
+unidecode
+twython
+pyyaml
+sparse_dot_mkl

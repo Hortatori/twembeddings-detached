@@ -2,7 +2,7 @@ import pickle
 import logging
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
 from sklearn.decomposition import TruncatedSVD
-from sklearn.preprocessing import MinMaxScaler, Normalizer
+from sklearn.preprocessing import MinMaxScaler, Normalizer, normalize
 from sklearn.pipeline import make_pipeline
 from scipy import sparse
 import numpy as np
@@ -188,15 +188,11 @@ class TfIdf:
             df = self.df
         self.n_samples += count_vectors.shape[0]
         # logging.info("Min_df reduces nb of features, new count matrix shape: {}".format(
-        #     count_vectors.shape)
-        # )
+        #     count_vectors.shape))
         # compute smoothed idf
         idf = np.log((self.n_samples + 1) / (df + 1)) + 1
-        transformer = TfidfTransformer()
-        transformer._idf_diag = sparse.diags(idf, offsets=0, shape=(len(df), len(df)), format="csr", dtype=df.dtype)
-        X = transformer.transform(count_vectors)
-        # equivalent to:
-        # X = normalize(X * transformer._idf_diag, norm='l2', copy=False)
+        idf_diag = sparse.diags(idf, offsets=0, shape=(len(df), len(df)), format="csr", dtype=df.dtype)
+        X = normalize(count_vectors * idf_diag, norm='l2', copy=False) 
         if svd:
             logging.info("Performing dimensionality reduction using LSA")
             svd = TruncatedSVD(n_components=n_components, random_state=42)
@@ -225,7 +221,7 @@ class SBERT:
 
     def __init__(self, sbert_model="paraphrase-MiniLM-L12-v2"):
         from sentence_transformers import SentenceTransformer
-        self.model = SentenceTransformer(sbert_model)
+        self.model = SentenceTransformer(sbert_model, device = 1) # dont forget : changing GPU depending on server
 
     def compute_vectors(self, data):
         data["text"] = data.text.str.slice(0, 500)

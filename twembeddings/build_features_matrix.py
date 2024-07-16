@@ -11,6 +11,7 @@ import os
 import re
 import csv
 import tensorflow_hub as hub
+import tensorflow_text
 from unidecode import unidecode
 from datetime import datetime, timedelta
 from collections import deque, defaultdict
@@ -89,14 +90,16 @@ def build_path(**args):
         if args[arg]:
             file_name += "_" + arg
     if args["model"] == "sbert":
-        sbert_model = args["sub_model"].replace("/","-")
+        sbert_model = args["sub_model"].replace("/", "-")
         file_name += "_" + sbert_model
+        logging.info("le nom du fichier est devenu : {} ici".format(file_name))
     return os.path.join("data", dataset, args["model"], file_name)
 
 
 def save_matrix(X, **args):
     path = build_path(**args)
     os.makedirs(os.path.join(*path.split("/")[:-1]), exist_ok=True)
+    logging.info("le chemin du doss matrices est : {}".format(*path.split("/")[:-1]))
     if issparse(X):
         save_npz(path, X)
     else:
@@ -238,6 +241,7 @@ def build_matrix(**args):
     X = load_matrix(**args)
     if args["model"] in text_embeddings:
         data = load_dataset(args["dataset"], args["annotation"], args["text+"])
+        
     if X is not None:
         logging.info("Matrix already stored")
         return X, data
