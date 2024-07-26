@@ -8,11 +8,11 @@ import logging
 import yaml
 import argparse
 import csv
-# from sklearn.cluster import DBSCAN
-from sklearn.cluster import AgglomerativeClustering
-from sklearn.metrics.pairwise import cosine_distances
+from sklearn.cluster import DBSCAN, AgglomerativeClustering
+import fastcluster
+from scipy.cluster.hierarchy import fcluster
+from scipy.cluster.hierarchy import linkage as sp_linkage
 import numpy as np
-
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s : %(message)s', level=logging.INFO)
 text_embeddings = ['tfidf_dataset', 'tfidf_all_tweets', 'w2v_gnews_en', "elmo", "bert", "sbert", "use"]
@@ -24,7 +24,7 @@ parser.add_argument('--model',
                     help="""
                     One or several text embeddings
                     """
-                    )
+                    )          
 parser.add_argument('--dataset',
                     required=True,
                     help="""
@@ -63,6 +63,13 @@ parser.add_argument('--sub-model',
                     required=False,
                     type=str
                     )
+parser.add_argument('--cluster_algo', 
+                    required=True, 
+                    choices=["FSD", "agglomerative", "DBSCAN", "fastcluster", "spy_fcluster"], 
+                    help="""
+                    A clustering algorithm
+                    """
+                    ) 
 
 def main(args):
     with open("options.yaml", "r") as f:
@@ -85,43 +92,55 @@ def main(args):
 
 
 def test_params(**params):
-    # ADDED params daily and cluster_test : for now, you need to change locally for testing clustering by day
-    daily = False
-    cluster_test = False
+    # ADDED clustering type in params**
     X, data = build_matrix(**params)
+    logging.info("X shape is {}".format(X.shape))
     params["window"] = int(data.groupby("date").size().mean()*params["window"]/24// params["batch_size"] * params["batch_size"])
     logging.info("window size: {}".format(params["window"]))
     params["distance"] = "cosine"
     # params["algo"] = "DBSCAN"
     # params["min_samples"] = 5
     thresholds = params.pop("threshold")
+    # ADDED for fastcluster only, as it compute a linking matrix instead of y_pred = cluster id
+    if params["cluster_algo"] == "fastcluster" :
+        logging.info("testing fastcluster")
+        linking_matrix = fastcluster.linkage(X, method = "average", metric = "cosine")
+        logging.info('end of fastcluster')
+    if params["cluster_algo"] == "spy_fcluster" :
+        logging.info("testing spy_fcluster")
+        linking_matrix = sp_linkage(X, method = "average", metric = "cosine")
+        logging.info('end of spy_fcluster')
+
     for t in thresholds:
         logging.info("threshold: {}".format(t))
-        logging.info("test cluster is {}".format(cluster_test))
-        # clustering = DBSCAN(eps=t, metric=params["distance"], min_samples=params["min_samples"]).fit(X)        
         if params["model"].startswith("tfidf") and params["distance"] == "cosine":
             clustering = ClusteringAlgoSparse(threshold=float(t), window_size=params["window"],
                                               batch_size=params["batch_size"], intel_mkl=False)
             clustering.add_vectors(X)
-        # added an if condition for testing cluster type
-        if cluster_test :
-            logging.info("trying test clustering")
-            logging.info("successed to test clustering")
-        else:
+        # ADDED an if condition for testing clustering algorithm
+        if params["cluster_algo"] == "FSD":
             clustering = ClusteringAlgo(threshold=float(t), window_size=params["window"],
                                         batch_size=params["batch_size"],
                                         distance=params["distance"])
             clustering.add_vectors(X)
-
-        # ADDED an if condition for y_pred in cluster testing
-        if cluster_test :
-            logging.info("displaying clustering labels")
-            y_pred = clustering.labels_ 
-        else :
             y_pred = clustering.incremental_clustering()
+        else:
+            logging.info("testing other clustering than FSD : {}".format(params["cluster_algo"]))
+            if params["cluster_algo"] == "DBSCAN":
+                clustering = DBSCAN(eps=t, metric=params["distance"], min_samples=5).fit(X)        
+                y_pred = clustering.labels_
+            if params["cluster_algo"] == "agglomerative":
+                clustering = AgglomerativeClustering(n_clusters=None, metric= "cosine", linkage = 'average', distance_threshold = t).fit(X)
+                y_pred = clustering.labels_
+            if params["cluster_algo"] == "fastcluster" or params["cluster_algo"] == "spy_fcluster":
+                y_pred = fcluster(linking_matrix, t, criterion='distance')
+                # to retrieve y, code clusetring on linking matrix. search for inconsistency matrix, which can be a parameter given
+            logging.info("successed to test clustering")
 
         stats = general_statistics(y_pred)
         p, r, f1 = cluster_event_match(data, y_pred)
+        logging.info("y pred shape {}".format(y_pred.shape))
+        logging.info("data shape {}".format(data.shape))
         ami = adjusted_mutual_info_score(data.label, y_pred)
         ari = adjusted_rand_score(data.label, y_pred)
         data["pred"] = data["pred"].astype(int)
@@ -131,21 +150,11 @@ def test_params(**params):
         for rc in candidate_columns:
             if rc in data.columns:
                 result_columns.append(rc)
-
-        # MODIF ajout d'une condition if pour envoyer les résultats / jour dans un fichier dédié
-        if cluster_test and daily:
-            # MODIF : crée un fichier dédié à l'agglomerative clustering et les scores/jours avec les labels predits + les clusters pour chaque tweet.
-            data[result_columns].to_csv(params["dataset"].replace(".", "_results_daily."),
-                                        index=False,
-                                        sep="\t",
-                                        quoting=csv.QUOTE_NONE
-                                        )
-        else :
-            data[result_columns].to_csv(params["dataset"].replace(".", "_results."),
-                                        index=False,
-                                        sep="\t",
-                                        quoting=csv.QUOTE_NONE
-                                        )
+        data[result_columns].to_csv(params["dataset"].replace(".", "_results."),
+                                    index=False,
+                                    sep="\t",
+                                    quoting=csv.QUOTE_NONE
+                                    )
         try:
             mcp, mcr, mcf1 = mcminn_eval(data, y_pred)
         except ZeroDivisionError as error:
@@ -160,25 +169,13 @@ def test_params(**params):
 
         logging.info(stats[["t", "model", "tfidf_weights", "p", "r", "f1"]].iloc[0])
         if params["save_results"]:
-            # ADDED update a scores/day file with new daily stats
-            if cluster_test and daily:
-            # commenter pour ne pas avoir un fichier historique de tous les runs AggloC
-                # try:
-                #     results = pd.read_csv("results_daily_cluster_tests.csv")
-                # except FileNotFoundError:
-                #     results = pd.DataFrame()
-                # stats = pd.concat([results, stats], ignore_index=True)
-                stats.to_csv("results_daily_cluster_tests.csv", index=False)
-                logging.info("Saved results to results_daily_cluster_tests.csv")
-            else :
-                try:
-                    results = pd.read_csv("results_clustering.csv")
-                except FileNotFoundError:
-                    results = pd.DataFrame()
-                stats = pd.concat([results, stats], ignore_index=True)
-                stats.to_csv("results_clustering.csv", index=False)
-                logging.info("Saved results to results_clustering.csv")
-
+            try:
+                results = pd.read_csv("results_clustering.csv")
+            except FileNotFoundError:
+                results = pd.DataFrame()
+            stats = pd.concat([results, stats], ignore_index=True)
+            stats.to_csv("results_clustering.csv", index=False)
+            logging.info("Saved results to results_clustering.csv")
 
 if __name__ == '__main__':
     args = vars(parser.parse_args())

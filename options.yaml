@@ -11,6 +11,7 @@ standard :
   dataset : "data/event2012.tsv"
   annotation : "annotated"
   text+ : False
+  cluster_algo : "FSD"
 
 # You may configure specific options for each model using the following fields to overwrite standard parameters
 tfidf_all_tweets :
@@ -18,7 +19,6 @@ tfidf_all_tweets :
   threshold :
     #- 0.6
     #- 0.65
-    #- 
     - 0.75
     #- 0.8
   remove_mentions : True
@@ -50,11 +50,14 @@ sbert_nli_sts:
 sbert:
   threshold:
     # - 0.30
-    # - 0.40
+    # - 0.45
     # - 0.50
+    # - 0.52
+    # - 0.54 # best f1 score with FSD + sbert on all dataset
+    # - 0.56
     # - 0.60
     # - 0.65
-    - 0.70
+    - 0.70 # best f1 score with agglomerativeclustering + sbert daily
     # - 0.80
   remove_mentions : False
   # sub_model : "Lajavaness/sentence-camembert-large"

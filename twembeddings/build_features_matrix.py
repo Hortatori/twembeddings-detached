@@ -99,7 +99,6 @@ def build_path(**args):
 def save_matrix(X, **args):
     path = build_path(**args)
     os.makedirs(os.path.join(*path.split("/")[:-1]), exist_ok=True)
-    logging.info("le chemin du doss matrices est : {}".format(*path.split("/")[:-1]))
     if issparse(X):
         save_npz(path, X)
     else:
