@@ -1,7 +1,11 @@
 from setuptools import setup
 
 setup(name='twembeddings',
+<<<<<<< HEAD
       version='0.1',
+=======
+      version='0.3.0',
+>>>>>>> upstream/master
       description='event detection in tweets',
       url='https://github.com/ina-foss/twembeddings',
       author='Béatrice Mazoyer',
