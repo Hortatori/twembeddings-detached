@@ -63,7 +63,7 @@ parser.add_argument('--sub-model',
                     required=False,
                     type=str
                     )
-parser.add_argument('--cluster_algo', 
+parser.add_argument('--clustering', 
                     required=True, 
                     choices=["FSD", "agglomerative", "DBSCAN", "fastcluster", "spy_fcluster"], 
                     help="""
@@ -92,21 +92,18 @@ def main(args):
 
 
 def test_params(**params):
-    # ADDED clustering type in params**
     X, data = build_matrix(**params)
     logging.info("X shape is {}".format(X.shape))
     params["window"] = int(data.groupby("date").size().mean()*params["window"]/24// params["batch_size"] * params["batch_size"])
     logging.info("window size: {}".format(params["window"]))
     params["distance"] = "cosine"
-    # params["algo"] = "DBSCAN"
-    # params["min_samples"] = 5
     thresholds = params.pop("threshold")
-    # ADDED for fastcluster only, as it compute a linking matrix instead of y_pred = cluster id
-    if params["cluster_algo"] == "fastcluster" :
+    # need to compute a linking matrix for fcluster and fastcluster
+    if params["clustering"] == "fastcluster" :
         logging.info("testing fastcluster")
         linking_matrix = fastcluster.linkage(X, method = "average", metric = "cosine")
         logging.info('end of fastcluster')
-    if params["cluster_algo"] == "spy_fcluster" :
+    if params["clustering"] == "spy_fcluster" :
         logging.info("testing spy_fcluster")
         linking_matrix = sp_linkage(X, method = "average", metric = "cosine")
         logging.info('end of spy_fcluster')
@@ -117,29 +114,27 @@ def test_params(**params):
             clustering = ClusteringAlgoSparse(threshold=float(t), window_size=params["window"],
                                               batch_size=params["batch_size"], intel_mkl=False)
             clustering.add_vectors(X)
-        # ADDED an if condition for testing clustering algorithm
-        if params["cluster_algo"] == "FSD":
+        if params["clustering"] == "FSD":
             clustering = ClusteringAlgo(threshold=float(t), window_size=params["window"],
                                         batch_size=params["batch_size"],
                                         distance=params["distance"])
             clustering.add_vectors(X)
             y_pred = clustering.incremental_clustering()
         else:
-            logging.info("testing other clustering than FSD : {}".format(params["cluster_algo"]))
-            if params["cluster_algo"] == "DBSCAN":
+            logging.info("testing other clustering than FSD : {}".format(params["clustering"]))
+            if params["clustering"] == "DBSCAN":
                 clustering = DBSCAN(eps=t, metric=params["distance"], min_samples=5).fit(X)        
                 y_pred = clustering.labels_
-            if params["cluster_algo"] == "agglomerative":
+            if params["clustering"] == "agglomerative":
                 clustering = AgglomerativeClustering(n_clusters=None, metric= "cosine", linkage = 'average', distance_threshold = t).fit(X)
                 y_pred = clustering.labels_
-            if params["cluster_algo"] == "fastcluster" or params["cluster_algo"] == "spy_fcluster":
+            if params["clustering"] == "fastcluster" or params["clustering"] == "spy_fcluster":
                 y_pred = fcluster(linking_matrix, t, criterion='distance')
-                # to retrieve y, code clusetring on linking matrix. search for inconsistency matrix, which can be a parameter given
             logging.info("successed to test clustering")
 
         stats = general_statistics(y_pred)
         p, r, f1 = cluster_event_match(data, y_pred)
-        logging.info("y pred shape {}".format(y_pred.shape))
+        logging.info("y pred length {}".format(len(y_pred)))
         logging.info("data shape {}".format(data.shape))
         ami = adjusted_mutual_info_score(data.label, y_pred)
         ari = adjusted_rand_score(data.label, y_pred)
@@ -163,8 +158,6 @@ def test_params(**params):
         stats.update({"t": t, "p": p, "r": r, "f1": f1, "mcp": mcp, "mcr": mcr, "mcf1": mcf1, "ami": ami, "ari": ari})
         stats.update(params)
         stats = pd.DataFrame(stats, index=[0])
-
-        # ADDED : date of the run when csv saves
         stats['datetime_of_run'] = pd.Timestamp.today().strftime('%Y-%m-%d-%H-%M')
 
         logging.info(stats[["t", "model", "tfidf_weights", "p", "r", "f1"]].iloc[0])

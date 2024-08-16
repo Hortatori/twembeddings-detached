@@ -26,7 +26,7 @@ def execute_command_on_files(directory):
 
         if os.path.isfile(file_path) and not (filename.endswith("results.tsv") or filename.endswith("results_daily.tsv")):
             # create command with file path
-            full_command = f"python clustering.py --dataset {file_path} --lang fr --model sbert --cluster_algo {cluster_name_daily}"
+            full_command = f"python clustering.py --dataset {file_path} --lang fr --model sbert --clustering {cluster_name_daily}"
             print(full_command)
             try:
                 # Exécute la commande avec Popen pour capturer les sorties en temps réel
@@ -63,7 +63,7 @@ try:
     output.loc[0,"p":"mcf1"] = temp["p":"mcf1"]
     output.loc[0,"dataset"] = "/".join(output.loc[0, "dataset"].split("/")[:-1])
     output.loc[0,"model"] = output.loc[0, "model"] + "_" + "daily"
-    output.loc[0,"cluster_algo"] = cluster_name_daily
+    output.loc[0,"clustering"] = cluster_name_daily
 
     try:
         old_results = pd.read_csv("results_clustering.csv")

@@ -1,4 +1,4 @@
-from twembeddings import build_matrix
+from twembeddings import build_matrix, load_dataset
 from twembeddings import ClusteringAlgo, ClusteringAlgoSparse
 from twembeddings import general_statistics, cluster_event_match, mcminn_eval
 import test_mean
@@ -66,14 +66,15 @@ parser.add_argument('--sub-model',
                     type=str
                     )
 # ADDED clustering type
-parser.add_argument('--cluster_algo', 
+parser.add_argument('--clustering', 
                     required=True, 
                     choices=["FSD", "agglomerative", "DBSCAN", "fastcluster", "spy_fcluster"], 
                     help="""
-                    A clustering algorithm
+                    A clustering algorithm :
                     """
                     )
-parser.add_argument("global_clustering",
+# ADDED : only used in the script, not in commands for now
+parser.add_argument("--global_clustering",
                     required=False) 
 
 def main(args):
@@ -96,76 +97,88 @@ def main(args):
         params["model"] = model
 
         # delete daily saves from last run
-        if os.path.exists("results_daily_cluster_tests.csv") :
-            os.remove("results_daily_cluster_tests.csv")
         if os.path.exists("ids_tweets_clusters.npy") :
             os.remove("ids_tweets_clusters.npy")
         if os.path.exists("mean_by_clusters.npy") :
             os.remove("mean_by_clusters.npy")
         # apply clustering() to each file day
         thresholds = params.pop("threshold")
+        params["global_clustering"] = True
+
         for t in thresholds:
             for filename in os.listdir("data/dailytweets_event2018/"):
                 file_path = os.path.join("data/dailytweets_event2018/", filename)
-                logging.info("file path and name {}".format(file_path))
-
-                if os.path.isfile(file_path) and not (filename.endswith("results.tsv") or filename.endswith("results_daily.tsv")):
+                if os.path.isfile(file_path) and (filename.endswith("results.tsv") or filename.endswith("results_daily.tsv")):
+                    os.remove(file_path)
+                else :
                     params["dataset"] = file_path
                     params["threshold"] = t
                     test_params(**params)
             params["global_clustering"] = True
+            global_X = np.load("mean_by_clusters.npy")
+            logging.info("globalX shape : {}".format(global_X.shape))
+            data = load_dataset("data/event2018.tsv", params["annotation"], params["text+"])
+            logging.info("shape data : {}".format(data.shape))
+            # params["clustering"] = "FSD"
+            y_pred = clustering(global_X, data, t, **params)
+            # if params["clustering"] == "spy_fcluster" :
+            #     linking_matrix = sp_linkage(global_X, method = "average", metric = "cosine")
+            #     y_pred = fcluster(linking_matrix, t, criterion='distance')
+            stats = general_statistics(y_pred)
+            logging.info("high level clustering succeded. stats : {}".format(stats))
+            tweets_ids = np.load("ids_tweets_clusters.npy")
+            matching = test_mean.mean_to_tweets(tweets_ids, y_pred)
+            final_pred = np.array(matching)
+            logging.info("post-matching btwn tweets & global cluster, shape of final pred : {}".format(final_pred.shape))
+            logging.info("testing event match")
+            p, r, f1 = cluster_event_match(data, final_pred)
+            ami = adjusted_mutual_info_score(data.label, final_pred)
+            ari = adjusted_rand_score(data.label, final_pred)
+            logging.info("t {} p {} r {} f1 {} ami {} ari {} ".format(t, p, r, f1, ami, ari))
 
 
-
-
-
-def test_params(**params):
-    # ADDED clustering type in params**
-    X, data = build_matrix(**params)
+def clustering(X, data, t, **params) :
     logging.info("X shape is {}".format(X.shape))
     params["window"] = int(data.groupby("date").size().mean()*params["window"]/24// params["batch_size"] * params["batch_size"])
     logging.info("window size: {}".format(params["window"]))
     params["distance"] = "cosine"
-    # params["algo"] = "DBSCAN"
-    # params["min_samples"] = 5
-    t = params.pop("threshold")
-    # ADDED for scipy clustering only, as it compute a linking matrix with distances (threshold value is not used at this step)
-    if params["cluster_algo"] == "fastcluster" :
-        logging.info("testing fastcluster")
-        linking_matrix = fastcluster.linkage(X, method = "average", metric = "cosine")
-        logging.info('end of fastcluster')
-    if params["cluster_algo"] == "spy_fcluster" :
-        logging.info("testing spy_fcluster")
-        linking_matrix = sp_linkage(X, method = "average", metric = "cosine")
-        logging.info('end of spy_fcluster')
 
     if params["model"].startswith("tfidf") and params["distance"] == "cosine":
         clustering = ClusteringAlgoSparse(threshold=float(t), window_size=params["window"],
                                             batch_size=params["batch_size"], intel_mkl=False)
         clustering.add_vectors(X)
-    # ADDED an if condition for testing clustering algorithm
-    if params["cluster_algo"] == "FSD":
+    if params["clustering"] == "FSD" :# and params["global_clustering"] == False:
         clustering = ClusteringAlgo(threshold=float(t), window_size=params["window"],
                                     batch_size=params["batch_size"],
                                     distance=params["distance"])
         clustering.add_vectors(X)
         y_pred = clustering.incremental_clustering()
-    else:
-        logging.info("testing other clustering than FSD : {}".format(params["cluster_algo"]))
-        if params["cluster_algo"] == "DBSCAN":
-            clustering = DBSCAN(eps=t, metric=params["distance"], min_samples=5).fit(X)        
-            y_pred = clustering.labels_
-        if params["cluster_algo"] == "agglomerative":
-            clustering = AgglomerativeClustering(n_clusters=None, metric= "cosine", linkage = 'average', distance_threshold = t).fit(X)
-            y_pred = clustering.labels_
-        if params["cluster_algo"] == "fastcluster" or params["cluster_algo"] == "spy_fcluster":
-            y_pred = fcluster(linking_matrix, t, criterion='distance')
-        logging.info("successed to test clustering")
+    # else:
+    logging.info("testing other clustering than FSD : {}".format(params["clustering"]))
+    if params["clustering"] == "fastcluster" :
+        linking_matrix = fastcluster.linkage(X, method = "average", metric = "cosine")
+        y_pred = fcluster(linking_matrix, t, criterion='distance')
+    if params["clustering"] == "spy_fcluster" :
+        linking_matrix = sp_linkage(X, method = "average", metric = "cosine")
+        y_pred = fcluster(linking_matrix, t, criterion='distance')
+    if params["clustering"] == "DBSCAN":
+        clustering = DBSCAN(eps=t, metric=params["distance"], min_samples=5).fit(X)        
+        y_pred = clustering.labels_
+    if params["clustering"] == "agglomerative":
+        clustering = AgglomerativeClustering(n_clusters=None, metric= "cosine", linkage = 'average', distance_threshold = t).fit(X)
+        y_pred = clustering.labels_
+    logging.info("successed to test clustering {}".format(params["clustering"]))
+    return y_pred
 
+
+def test_params(**params):
+    X, data = build_matrix(**params)
+    logging.info("X shape : {}".format(X.shape))
+    t = params.pop("threshold")
+
+    y_pred = clustering(X, data, t, **params)
 
     stats = general_statistics(y_pred)
-    logging.info("y pred shape {}".format(y_pred.shape))
-    logging.info("data shape {}".format(data.shape))
     p, r, f1 = cluster_event_match(data, y_pred)
     ami = adjusted_mutual_info_score(data.label, y_pred)
     ari = adjusted_rand_score(data.label, y_pred)
@@ -178,11 +191,12 @@ def test_params(**params):
             result_columns.append(rc)
 
     # ADDED sending results/days in a dedicated file 
-    data[result_columns].to_csv(params["dataset"].replace(".", "_results_daily."),
-                                index=False,
-                                sep="\t",
-                                quoting=csv.QUOTE_NONE
-                                )
+    # not usefull to save results for each days now? We dont need a mean on all daily results
+    # data[result_columns].to_csv(params["dataset"].replace(".", "_results_daily."),
+    #                             index=False,
+    #                             sep="\t",
+    #                             quoting=csv.QUOTE_NONE
+    #                             )
     try:
         mcp, mcr, mcf1 = mcminn_eval(data, y_pred)
     except ZeroDivisionError as error:
@@ -190,23 +204,19 @@ def test_params(**params):
     stats.update({"t": t, "p": p, "r": r, "f1": f1, "mcp": mcp, "mcr": mcr, "mcf1": mcf1, "ami": ami, "ari": ari})
     stats.update(params)
     stats = pd.DataFrame(stats, index=[0])
-    # ADDED : date of the run when csv saves
     stats['datetime_of_run'] = pd.Timestamp.today().strftime('%Y-%m-%d-%H-%M')
     logging.info(stats[["t", "model", "tfidf_weights", "p", "r", "f1", "ami", "ari"]].iloc[0])
-    if params["save_results"]:
-        # ADDED update a scores/day file with new daily stats
-        try:
-            results = pd.read_csv("results_daily_cluster_tests.csv")
-        except FileNotFoundError:
-            results = pd.DataFrame()
-        stats = pd.concat([results, stats], ignore_index=True)
-        stats.to_csv("results_daily_cluster_tests.csv", index=False)
-        logging.info("Saved results to results_daily_cluster_tests.csv")
+    # if params["save_results"]:
+    #     # ADDED update a scores/day file with new daily stats
+    #     try:
+    #         results = pd.read_csv("results_daily_cluster_tests.csv")
+    #     except FileNotFoundError:
+    #         results = pd.DataFrame()
+    #     stats = pd.concat([results, stats], ignore_index=True)
+    #     stats.to_csv("results_daily_cluster_tests.csv", index=False)
+    #     logging.info("Saved results to results_daily_cluster_tests.csv")
 
-    logging.info("starting main in TEST_MEAN.py")
     test_mean.main_mean(X, y_pred)
-    logging.info("ended main in TEST_MEAN.py")
-
     # # save results in a dedicated file for global dataset results
     # try:
     #     results = pd.read_csv("days_results_clustering.csv")
