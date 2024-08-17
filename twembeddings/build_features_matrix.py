@@ -10,8 +10,6 @@ import numpy as np
 import os
 import re
 import csv
-import tensorflow_hub as hub
-import tensorflow_text
 from unidecode import unidecode
 from datetime import datetime, timedelta
 from collections import deque, defaultdict
@@ -81,25 +79,23 @@ def format_text(text, **format):
 
 def build_path(**args):
     if args["dataset"].startswith("event2018"):
-        dataset = args["dataset"]
+        dataset = args["dataset"].replace(".tsv", "")
     else:
         dataset = args["dataset"].split("/")[-1].replace(".tsv", "")
 
-    file_name = args["annotation"]
+    file_name = args.get("annotation", "vectors")
     for arg in ["text+", "hashtag_split", "svd", "tfidf_weights"]:
-        if args[arg]:
+        if arg in args and args[arg]:
             file_name += "_" + arg
     if args["model"] == "sbert":
         sbert_model = args["sub_model"].replace("/", "-")
         file_name += "_" + sbert_model
-        logging.info("le nom du fichier est devenu : {} ici".format(file_name))
     return os.path.join("data", dataset, args["model"], file_name)
 
 
 def save_matrix(X, **args):
     path = build_path(**args)
     os.makedirs(os.path.join(*path.split("/")[:-1]), exist_ok=True)
-    logging.info("le chemin du doss matrices est : {}".format(*path.split("/")[:-1]))
     if issparse(X):
         save_npz(path, X)
     else:
@@ -108,7 +104,7 @@ def save_matrix(X, **args):
 
 def apply_mask(path, suffix, args, column):
     X = np.load(path + suffix) if suffix == ".npy" else load_npz(path + suffix)
-    data = load_dataset(args["dataset"], args["annotation"], args["text+"])
+    data = load_dataset(args["dataset"], args.get("annotation", "vectors"), args.get("text+", False))
     mask = data[column].notna()
     return X[mask]
 
@@ -205,7 +201,7 @@ def save_tokens_JLH(inpath,
                     counts["window_count"] += 1
                     if counts["count"] != counts["window_count"]:
                         percent = counts["window_count"]/len(window)
-                        counts["percent_max"] = max(percent, counts["percent_max"])
+                        counts["percent_max"] = max(percent, counts["percent_max"]) # type: ignore
                     if counts["percent_max"] == 1:
                         print(t, len(window), counts)
 
@@ -240,8 +236,7 @@ def save_tokens_JLH(inpath,
 def build_matrix(**args):
     X = load_matrix(**args)
     if args["model"] in text_embeddings:
-        data = load_dataset(args["dataset"], args["annotation"], args["text+"])
-        
+        data = load_dataset(args["dataset"], args.get("annotation", "vectors"), args.get("text+", False))
     if X is not None:
         logging.info("Matrix already stored")
         return X, data
@@ -326,13 +321,7 @@ def build_matrix(**args):
                                     hashtag_split=True
                                     )
 
-        # todo: prevent warning message if no cuda with os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
-        if args["lang"] == "en":
-            embed = hub.load("https://tfhub.dev/google/universal-sentence-encoder-large/5")
-        else:
-            embed = hub.load("https://tfhub.dev/google/universal-sentence-encoder-multilingual/3")
-
-        vectorizer = USE(embed)
+        vectorizer = USE()
         X = vectorizer.compute_vectors(data)
 
     elif args["model"] == "resnet":
