@@ -269,12 +269,15 @@ class Elmo:
 class USE:
 
     def __init__(self, lang="fr"):
-
-        import tensorflow_hub as hub
+        logging.disable(logging.WARNING)
+        os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
         # tensorflow_text seems unused but necessary to run the hub.load
+        import tensorflow_hub as hub
         import tensorflow_text
+        logging.disable(logging.NOTSET)
 
         self.name = "UniversalSentenceEncoder"
+        self.dim = 512
 
         # todo: prevent warning message if no cuda with os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
         if lang == "en":
@@ -282,12 +285,10 @@ class USE:
         else:
             self.embed = hub.load("https://tfhub.dev/google/universal-sentence-encoder-multilingual/3")
 
-
-
     def compute_vectors(self, data):
         batch_size = 64
         n = data.shape[0]
-        vectors = np.zeros([n, 512])
+        vectors = np.zeros([n, self.dim])
         for i in tqdm(range(0, n, batch_size)):
             vectors[i:min(n, i+batch_size)] = self.embed(data.text[i:min(n, i+batch_size)])
         return vectors
