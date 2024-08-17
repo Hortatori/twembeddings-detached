@@ -92,6 +92,7 @@ def main(args):
             if args[arg] is not None:
                 # params from command line overwrite options.yaml file
                 params[arg] = args[arg]
+        params["daily"] = True
 
         logging.info("dataset parameter is {}".format(params["dataset"]))
         params["model"] = model

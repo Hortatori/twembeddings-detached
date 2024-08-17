@@ -59,6 +59,8 @@ parser.add_argument('--window',
                     default=24,
                     type=int
                     )
+parser.add_argument('--daily',
+                    required = False)
 parser.add_argument('--sub-model',
                     required=False,
                     type=str

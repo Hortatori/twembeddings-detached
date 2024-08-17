@@ -12,16 +12,17 @@ standard :
   annotation : "annotated"
   text+ : False
   clustering : "FSD"
+  daily : "False"
 
 # You may configure specific options for each model using the following fields to overwrite standard parameters
 tfidf_all_tweets :
   save : False
   threshold :
-    # - 0.6
-    # - 0.65
-    # - 0.75
-    # - 0.8
-    - 0.70
+     - 0.6
+     - 0.65
+     - 0.70
+     - 0.75
+     - 0.8
   remove_mentions : True
 tfidf_dataset :
   save : False
