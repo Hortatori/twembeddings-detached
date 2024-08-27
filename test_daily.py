@@ -1,76 +1,285 @@
-import os
-import subprocess
+# import os
+# import subprocess
+# import pandas as pd
+# import logging
+from twembeddings import build_matrix
+from twembeddings import ClusteringAlgo, ClusteringAlgoSparse
+from twembeddings import general_statistics, cluster_event_match, mcminn_eval
+from sklearn.metrics.cluster import adjusted_mutual_info_score, adjusted_rand_score
 import pandas as pd
 import logging
-""""
-to note, for this code, 
-STEP 1 : you have to change daily from False to TRUE in clustering.py
-STEP 2 : you have to change the value of cluster_name_daily for the name of the clustering algo you are testing
-
-This code doesnt support to have multiple combination of options in the yaml file (not more than one threshold for ex.)
-"""
-cluster_name_daily = "fastcluster"
+import yaml
+import argparse
+import csv
+from sklearn.cluster import DBSCAN, AgglomerativeClustering
+import fastcluster
+from scipy.cluster.hierarchy import fcluster
+from scipy.cluster.hierarchy import linkage as sp_linkage
+import os
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s : %(message)s', level=logging.INFO)
-def execute_command_on_files(directory):
-    # delete daily results from last run
-    if os.path.exists("results_daily_cluster_tests.csv") :
-        os.remove("results_daily_cluster_tests.csv")
+text_embeddings = ['tfidf_dataset', 'tfidf_all_tweets', 'w2v_gnews_en', "elmo", "bert", "sbert", "use"]
+parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
+parser.add_argument('--model',
+                    nargs='+',
+                    required=True,
+                    choices=text_embeddings,
+                    help="""
+                    One or several text embeddings
+                    """
+                    )          
+parser.add_argument('--dataset',
+                    required=True,
+                    help="""
+                    Path to the dataset
+                    """
+                    )
 
-    if not os.path.isdir(directory):
-        print(f"Le répertoire {directory} n'existe pas.")
-        return
-    # through all files of directory
-    for filename in os.listdir(directory):
-        file_path = os.path.join(directory, filename)
+parser.add_argument('--lang',
+                    required=True,
+                    choices=["en", "fr"])
 
-        if os.path.isfile(file_path) and not (filename.endswith("results.tsv") or filename.endswith("results_daily.tsv")):
-            # create command with file path
-            full_command = f"python clustering.py --dataset {file_path} --lang fr --model sbert --clustering {cluster_name_daily}"
-            print(full_command)
-            try:
-                # Exécute la commande avec Popen pour capturer les sorties en temps réel
-                process = subprocess.Popen(full_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                
-                # Lire les sorties en temps réel
-                while True:
-                    output = process.stdout.readline()
-                    if output == '' and process.poll() is not None:
-                        break
-                    if output:
-                        print(output.strip())
+parser.add_argument('--annotation',
+                    required=False,
+                    choices=["examined", "annotated", "no"])
 
-                stderr_output = process.stderr.read()
-                if stderr_output:
-                    print("Erreur :", stderr_output.strip())
+parser.add_argument('--threshold',
+                    nargs='+',
+                    required=False
+                    )
 
-                rc = process.poll()
-                print(f"Code de retour : {rc}")
+parser.add_argument('--batch_size',
+                    required=False,
+                    type=int
+                    )
 
-            except Exception as e:
-                print(f"Erreur lors de l'exécution de la commande sur {file_path} : {str(e)}")
-                break
+parser.add_argument('--remove_mentions',
+                    action='store_true'
+                    )
 
-directory = "data/dailytweets_event2018/"
-execute_command_on_files(directory)
+parser.add_argument('--window',
+                    required=False,
+                    default=24,
+                    type=int
+                    )
+parser.add_argument('--daily',
+                    required = False)
+parser.add_argument('--sub-model',
+                    required=False,
+                    type=str
+                    )
+# ADDED clustering type
+parser.add_argument('--clustering', 
+                    required=True, 
+                    choices=["FSD", "agglomerative", "DBSCAN", "fastcluster", "spy_fcluster"], 
+                    help="""
+                    A clustering algorithm :
+                    """
+                    )
+# ADDED : only used in the script, not in commands for now
+parser.add_argument("--global_clustering",
+                    required=False) 
+parser.add_argument("--folder_name",
+                    required=False) 
 
-try:
-    results = pd.read_csv("results_daily_cluster_tests.csv")
-    temp = results.mean(numeric_only=True)
-    output = results.iloc[[0]].copy()
-    output.loc[0,"count"] = int(temp["count"])
-    output.loc[0,"mean":"max"] = temp["mean":"max"]
-    output.loc[0,"p":"mcf1"] = temp["p":"mcf1"]
-    output.loc[0,"dataset"] = "/".join(output.loc[0, "dataset"].split("/")[:-1])
-    output.loc[0,"model"] = output.loc[0, "model"] + "_" + "daily"
-    output.loc[0,"clustering"] = cluster_name_daily
+def main(args):
+    with open("options.yaml", "r") as f:
+        options = yaml.safe_load(f)
+    for model in args["model"]:
+        # load standard parameters
+        params = options["standard"]
+        logging.info("Clustering with {} model".format(model))
+        if model in options:
+            # change standard parameters for this specific model
+            for opt in options[model]:
+                params[opt] = options[model][opt]
+        for arg in args:
+            if args[arg] is not None:
+                # params from command line overwrite options.yaml file
+                params[arg] = args[arg]
+        params["daily"] = True
+    for p in params :
+        logging.info(p)
+        logging.info("dataset parameter is {}".format(params["dataset"]))
+        params["model"] = model
 
+        # apply clustering() to each file day
+        thresholds = params.pop("threshold")
+        params["global_clustering"] = True
+        params['folder_name'] = params["dataset"]
+        for t in thresholds:
+            logging.info(f"{params['folder_name']}_daily_results.csv")
+            if os.path.exists(f"{params['folder_name']}_daily_results.csv"):
+                os.remove(f"{params['folder_name']}_daily_results.csv")
+
+            for filename in os.listdir(params["folder_name"]):
+                file_path = os.path.join(params["folder_name"], filename)
+                if os.path.isfile(file_path) and (filename.endswith("results.tsv") or filename.endswith("results_daily.tsv")):
+                    os.remove(file_path)
+                else :
+                    params["dataset"] = file_path
+                    logging.info(params["dataset"])
+                    params["threshold"] = t
+                    test_params(**params)
+
+            if params["save_results"]:
+                try:
+                    results = pd.read_csv(f"{params['folder_name']}_daily_results.csv")
+                    temp = results.mean(numeric_only=True)
+                    output = results.iloc[[0]].copy()
+                    output.loc[0,"count"] = int(temp["count"])
+                    output.loc[0,"mean":"max"] = temp["mean":"max"]
+                    output.loc[0,"p":"mcf1"] = temp["p":"mcf1"]
+
+                    try:
+                        old_results = pd.read_csv("results_clustering.csv")
+                    except FileNotFoundError:
+                        logging.info("no file results_clustering.csv found")
+                    stats = pd.concat([old_results, output], ignore_index=True)
+                    stats.to_csv("results_clustering.csv", index=False)
+
+                except FileNotFoundError:
+                    logging.info(f"no file {params['folder_name']}_daily_results.csv found")
+
+
+def clustering(X, data, t, **params) :
+    logging.info("X shape is {}".format(X.shape))
+    params["window"] = int(data.groupby("date").size().mean()*params["window"]/24// params["batch_size"] * params["batch_size"])
+    logging.info("window size: {}".format(params["window"]))
+    params["distance"] = "cosine"
+
+    if params["model"].startswith("tfidf") and params["distance"] == "cosine":
+        clustering = ClusteringAlgoSparse(threshold=float(t), window_size=params["window"],
+                                            batch_size=params["batch_size"], intel_mkl=False)
+        clustering.add_vectors(X)
+    if params["clustering"] == "FSD" :
+        clustering = ClusteringAlgo(threshold=float(t), window_size=params["window"],
+                                    batch_size=params["batch_size"],
+                                    distance=params["distance"])
+        clustering.add_vectors(X)
+        y_pred = clustering.incremental_clustering()
+    # else:
+    logging.info("testing other clustering than FSD : {}".format(params["clustering"]))
+    if params["clustering"] == "fastcluster" :
+        linking_matrix = fastcluster.linkage(X, method = "average", metric = "cosine")
+        y_pred = fcluster(linking_matrix, t, criterion='distance')
+    if params["clustering"] == "spy_fcluster" :
+        linking_matrix = sp_linkage(X, method = "average", metric = "cosine")
+        y_pred = fcluster(linking_matrix, t, criterion='distance')
+    if params["clustering"] == "DBSCAN":
+        clustering = DBSCAN(eps=t, metric=params["distance"], min_samples=5).fit(X)        
+        y_pred = clustering.labels_
+    if params["clustering"] == "agglomerative":
+        clustering = AgglomerativeClustering(n_clusters=None, metric= "cosine", linkage = 'average', distance_threshold = t).fit(X)
+        y_pred = clustering.labels_
+    logging.info("successed to test clustering {}".format(params["clustering"]))
+    return y_pred
+
+
+def test_params(**params):
+    X, data = build_matrix(**params)
+    logging.info("X shape : {}".format(X.shape))
+    t = params.pop("threshold")
+
+    y_pred = clustering(X, data, t, **params)
+
+    stats = general_statistics(y_pred)
+    p, r, f1 = cluster_event_match(data, y_pred)
+    ami = adjusted_mutual_info_score(data.label, y_pred)
+    ari = adjusted_rand_score(data.label, y_pred)
+    data["pred"] = data["pred"].astype(int)
+    data["id"] = data["id"].astype(int)
+    candidate_columns = ["date", "time", "label", "pred", "user_id_str", "id"]
+    result_columns = []
+    for rc in candidate_columns:
+        if rc in data.columns:
+            result_columns.append(rc)
+
+    # sending results/days in a dedicated file 
+    data[result_columns].to_csv(f"{params['folder_name']}_daily_results",
+                                index=False,
+                                sep="\t",
+                                quoting=csv.QUOTE_NONE
+                                )
     try:
-        old_results = pd.read_csv("results_clustering.csv")
+        mcp, mcr, mcf1 = mcminn_eval(data, y_pred)
+    except ZeroDivisionError as error:
+        logging.error(error)
+    stats.update({"t": t, "p": p, "r": r, "f1": f1, "mcp": mcp, "mcr": mcr, "mcf1": mcf1, "ami": ami, "ari": ari})
+    stats.update(params)
+    stats = pd.DataFrame(stats, index=[0])
+    stats['datetime_of_run'] = pd.Timestamp.today().strftime('%Y-%m-%d-%H-%M')
+    logging.info(stats[["t", "model", "tfidf_weights", "p", "r", "f1", "ami", "ari"]].iloc[0])
+    # ADDED update a scores/day file with new daily stats
+    try:
+        results = pd.read_csv(f"{params['folder_name']}_daily_results.csv")
     except FileNotFoundError:
-        old_results = pd.DataFrame()
-    stats = pd.concat([old_results, output], ignore_index=True)
-    stats.to_csv("results_clustering.csv", index=False)
+        results = pd.DataFrame()
+    stats = pd.concat([results, stats], ignore_index=True)
+    stats.to_csv(f"{params['folder_name']}_daily_results.csv", index=False)
+    logging.info("Saved results to results_daily_cluster_tests.csv")
 
-except FileNotFoundError:
-    print("pas de fichier results_daily_cluster_tests.csv trouvé")
+    # # save results in a dedicated file for global dataset results
+    # try:
+    #     results = pd.read_csv("days_results_clustering.csv")
+    # except FileNotFoundError:
+    #     results = pd.DataFrame()
+    # stats = pd.concat([results, stats], ignore_index=True)
+    # stats.to_csv("days_results_clustering.csv", index=False)
+    # logging.info("Saved results to days_results_clustering.csv")
+
+if __name__ == '__main__':
+    args = vars(parser.parse_args())
+    main(args)
+
+# """"
+# to note, for this code, 
+# STEP 1 : you have to change daily from False to TRUE in clustering.py
+# STEP 2 : you have to change the value of cluster_name_daily for the name of the clustering algo you are testing
+
+# This code doesnt support to have multiple combination of options in the yaml file (not more than one threshold for ex.)
+# """
+# cluster_name_daily = "fastcluster"
+
+# logging.basicConfig(format='%(asctime)s - %(levelname)s : %(message)s', level=logging.INFO)
+# def execute_command_on_files(directory):
+#     # delete daily results from last run
+#     if os.path.exists("results_daily_cluster_tests.csv") :
+#         os.remove("results_daily_cluster_tests.csv")
+
+#     if not os.path.isdir(directory):
+#         print(f"Le répertoire {directory} n'existe pas.")
+#         return
+#     # through all files of directory
+#     for filename in os.listdir(directory):
+#         file_path = os.path.join(directory, filename)
+
+#         if os.path.isfile(file_path) and not (filename.endswith("results.tsv") or filename.endswith("results_daily.tsv")):
+#             # create command with file path
+#             full_command = f"python clustering.py --dataset {file_path} --lang fr --model sbert --clustering {cluster_name_daily}"
+#             print(full_command)
+#             try:
+#                 # Exécute la commande avec Popen pour capturer les sorties en temps réel
+#                 process = subprocess.Popen(full_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                
+#                 # Lire les sorties en temps réel
+#                 while True:
+#                     output = process.stdout.readline()
+#                     if output == '' and process.poll() is not None:
+#                         break
+#                     if output:
+#                         print(output.strip())
+
+#                 stderr_output = process.stderr.read()
+#                 if stderr_output:
+#                     print("Erreur :", stderr_output.strip())
+
+#                 rc = process.poll()
+#                 print(f"Code de retour : {rc}")
+
+#             except Exception as e:
+#                 print(f"Erreur lors de l'exécution de la commande sur {file_path} : {str(e)}")
+#                 break
+
+# directory = "data/dailytweets_event2018/"
+# execute_command_on_files(directory)
