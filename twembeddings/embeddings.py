@@ -221,7 +221,7 @@ class SBERT:
 
     def __init__(self, sbert_model="paraphrase-MiniLM-L12-v2"):
         from sentence_transformers import SentenceTransformer
-        self.model = SentenceTransformer(sbert_model, device = 1) # dont forget : changing GPU depending on server
+        self.model = SentenceTransformer(sbert_model, device = 0) # dont forget : changing GPU depending on server -> 0 on atropos, 1 on clothos
 
     def compute_vectors(self, data):
         data["text"] = data.text.str.slice(0, 500)
