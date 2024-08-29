@@ -9,7 +9,6 @@ import yaml
 import argparse
 import csv
 from sklearn.cluster import DBSCAN, AgglomerativeClustering
-import fastcluster
 from scipy.cluster.hierarchy import fcluster
 from scipy.cluster.hierarchy import linkage as sp_linkage
 import numpy as np
@@ -67,7 +66,7 @@ parser.add_argument('--sub-model',
                     )
 parser.add_argument('--clustering', 
                     required=True, 
-                    choices=["FSD", "agglomerative", "DBSCAN", "fastcluster", "spy_fcluster"], 
+                    choices=["FSD", "agglomerative", "DBSCAN", "spy_fcluster"], 
                     help="""
                     A clustering algorithm
                     """
@@ -100,11 +99,7 @@ def test_params(**params):
     logging.info("window size: {}".format(params["window"]))
     params["distance"] = "cosine"
     thresholds = params.pop("threshold")
-    # need to compute a linking matrix for fcluster and fastcluster
-    if params["clustering"] == "fastcluster" :
-        logging.info("testing fastcluster")
-        linking_matrix = fastcluster.linkage(X, method = "average", metric = "cosine")
-        logging.info('end of fastcluster')
+    # need to compute a linking matrix for fcluster
     if params["clustering"] == "spy_fcluster" :
         logging.info("testing spy_fcluster")
         linking_matrix = sp_linkage(X, method = "average", metric = "cosine")
@@ -130,7 +125,7 @@ def test_params(**params):
             if params["clustering"] == "agglomerative":
                 clustering = AgglomerativeClustering(n_clusters=None, metric= "cosine", linkage = 'average', distance_threshold = t).fit(X)
                 y_pred = clustering.labels_
-            if params["clustering"] == "fastcluster" or params["clustering"] == "spy_fcluster":
+            if params["clustering"] == "spy_fcluster":
                 y_pred = fcluster(linking_matrix, t, criterion='distance')
             logging.info("successed to test clustering")
 

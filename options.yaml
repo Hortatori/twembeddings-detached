@@ -63,7 +63,7 @@ sbert:
     # - 0.80
   remove_mentions : False
   # sub_model : "Lajavaness/sentence-camembert-large"
-  sub_model : "dangvantuan/sentence-camembert-large"
+  # sub_model : "dangvantuan/sentence-camembert-large"
   # sub_model : "almanach/camemberta-base" PB : produit toujours le même résultat
   # sub_model : "almanach/camembert-large" div zero error très tôt
   # sub_model : "dangvantuan/sentence-camembert-base"
@@ -73,7 +73,7 @@ sbert:
   # sub_model : "paraphrase-multilingual-MiniLM-L12-v2"
   # sub_model : "Salesforce/SFR-Embedding-2_R" out of memory
   # sub_model : "WhereIsAI/UAE-Large-V1"
-  # sub_model : "sentence-transformers/all-mpnet-base-v2"
+  sub_model : "sentence-transformers/all-mpnet-base-v2"
   # sub_model : "intfloat/multilingual-e5-large-instruct" error float division by zero et toujours le meme nb de clusters
 bert:
   threshold:
