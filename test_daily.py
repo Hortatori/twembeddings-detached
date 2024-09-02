@@ -96,12 +96,11 @@ def main(args):
         logging.info("dataset parameter is {}".format(params["dataset"]))
         params["model"] = model
 
-        # apply clustering() to each day
+        # apply clustering() to each day -- directory is generated with split_by_days.py
         thresholds = params.pop("threshold")
         params["global_clustering"] = True
         params['folder_name'] = params["dataset"]
         for t in thresholds:
-            logging.info(f"{params['folder_name']}_daily_results.csv")
             if os.path.exists(f"{params['folder_name']}_daily_results.csv"):
                 os.remove(f"{params['folder_name']}_daily_results.csv")
 
@@ -111,7 +110,6 @@ def main(args):
                     os.remove(file_path)
                 else :
                     params["dataset"] = file_path
-                    logging.info(params["dataset"])
                     params["threshold"] = t
                     test_params(**params)
             if params["save_results"]:
