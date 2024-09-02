@@ -1,7 +1,3 @@
-# import os
-# import subprocess
-# import pandas as pd
-# import logging
 from twembeddings import build_matrix
 from twembeddings import ClusteringAlgo, ClusteringAlgoSparse
 from twembeddings import general_statistics, cluster_event_match, mcminn_eval
@@ -97,12 +93,10 @@ def main(args):
                 # params from command line overwrite options.yaml file
                 params[arg] = args[arg]
         params["daily"] = True
-    for p in params :
-        logging.info(p)
         logging.info("dataset parameter is {}".format(params["dataset"]))
         params["model"] = model
 
-        # apply clustering() to each file day
+        # apply clustering() to each day
         thresholds = params.pop("threshold")
         params["global_clustering"] = True
         params['folder_name'] = params["dataset"]
@@ -120,7 +114,6 @@ def main(args):
                     logging.info(params["dataset"])
                     params["threshold"] = t
                     test_params(**params)
-
             if params["save_results"]:
                 try:
                     results = pd.read_csv(f"{params['folder_name']}_daily_results.csv")
@@ -129,6 +122,8 @@ def main(args):
                     output.loc[0,"count"] = int(temp["count"])
                     output.loc[0,"mean":"max"] = temp["mean":"max"]
                     output.loc[0,"p":"mcf1"] = temp["p":"mcf1"]
+                    output.loc[0,"datetime_of_run"] = pd.Timestamp.today().strftime("%Y-%m-%d-%H-%M")
+                    logging.info("mean results on all dataset:\n{}".format(output))
 
                     try:
                         old_results = pd.read_csv("results_clustering.csv")
@@ -136,6 +131,7 @@ def main(args):
                         logging.info("no file results_clustering.csv found")
                     stats = pd.concat([old_results, output], ignore_index=True)
                     stats.to_csv("results_clustering.csv", index=False)
+                    logging.info("mean results successfully saved in results_clustering.csv")
 
                 except FileNotFoundError:
                     logging.info(f"no file {params['folder_name']}_daily_results.csv found")
@@ -175,6 +171,9 @@ def clustering(X, data, t, **params) :
 def test_params(**params):
     X, data = build_matrix(**params)
     logging.info("X shape : {}".format(X.shape))
+    if X.shape[0] < 2 :
+        logging.info("this day has only one tweet, skipping it")
+        return
     t = params.pop("threshold")
 
     y_pred = clustering(X, data, t, **params)
@@ -201,10 +200,11 @@ def test_params(**params):
         mcp, mcr, mcf1 = mcminn_eval(data, y_pred)
     except ZeroDivisionError as error:
         logging.error(error)
+        return
     stats.update({"t": t, "p": p, "r": r, "f1": f1, "mcp": mcp, "mcr": mcr, "mcf1": mcf1, "ami": ami, "ari": ari})
     stats.update(params)
     stats = pd.DataFrame(stats, index=[0])
-    stats['datetime_of_run'] = pd.Timestamp.today().strftime('%Y-%m-%d-%H-%M')
+    stats.drop(columns=["folder_name","global_clustering"], axis = 1, inplace = True)
     logging.info(stats[["t", "model", "tfidf_weights", "p", "r", "f1", "ami", "ari"]].iloc[0])
     # ADDED update a scores/day file with new daily stats
     try:
@@ -215,67 +215,7 @@ def test_params(**params):
     stats.to_csv(f"{params['folder_name']}_daily_results.csv", index=False)
     logging.info("Saved results to results_daily_cluster_tests.csv")
 
-    # # save results in a dedicated file for global dataset results
-    # try:
-    #     results = pd.read_csv("days_results_clustering.csv")
-    # except FileNotFoundError:
-    #     results = pd.DataFrame()
-    # stats = pd.concat([results, stats], ignore_index=True)
-    # stats.to_csv("days_results_clustering.csv", index=False)
-    # logging.info("Saved results to days_results_clustering.csv")
 
 if __name__ == '__main__':
     args = vars(parser.parse_args())
     main(args)
-
-# """"
-# to note, for this code, 
-# STEP 1 : you have to change daily from False to TRUE in clustering.py
-# STEP 2 : you have to change the value of cluster_name_daily for the name of the clustering algo you are testing
-
-# This code doesnt support to have multiple combination of options in the yaml file (not more than one threshold for ex.)
-# """
-# cluster_name_daily = "TO FILL"
-
-# logging.basicConfig(format='%(asctime)s - %(levelname)s : %(message)s', level=logging.INFO)
-# def execute_command_on_files(directory):
-#     # delete daily results from last run
-#     if os.path.exists("results_daily_cluster_tests.csv") :
-#         os.remove("results_daily_cluster_tests.csv")
-
-#     if not os.path.isdir(directory):
-#         print(f"Le répertoire {directory} n'existe pas.")
-#         return
-#     # through all files of directory
-#     for filename in os.listdir(directory):
-#         file_path = os.path.join(directory, filename)
-
-#         if os.path.isfile(file_path) and not (filename.endswith("results.tsv") or filename.endswith("results_daily.tsv")):
-#             # create command with file path
-#             full_command = f"python clustering.py --dataset {file_path} --lang fr --model sbert --clustering {cluster_name_daily}"
-#             print(full_command)
-#             try:
-#                 # Exécute la commande avec Popen pour capturer les sorties en temps réel
-#                 process = subprocess.Popen(full_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                
-#                 # Lire les sorties en temps réel
-#                 while True:
-#                     output = process.stdout.readline()
-#                     if output == '' and process.poll() is not None:
-#                         break
-#                     if output:
-#                         print(output.strip())
-
-#                 stderr_output = process.stderr.read()
-#                 if stderr_output:
-#                     print("Erreur :", stderr_output.strip())
-
-#                 rc = process.poll()
-#                 print(f"Code de retour : {rc}")
-
-#             except Exception as e:
-#                 print(f"Erreur lors de l'exécution de la commande sur {file_path} : {str(e)}")
-#                 break
-
-# directory = "data/dailytweets_event2018/"
-# execute_command_on_files(directory)
