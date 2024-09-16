@@ -9,6 +9,7 @@ import yaml
 import argparse
 import csv
 from sklearn.cluster import DBSCAN, AgglomerativeClustering
+import hdbscan
 from scipy.cluster.hierarchy import fcluster
 from scipy.cluster.hierarchy import linkage as sp_linkage
 import numpy as np
@@ -59,14 +60,15 @@ parser.add_argument('--window',
                     type=int
                     )
 parser.add_argument('--daily',
-                    required = False)
+                    required = False
+                    )
 parser.add_argument('--sub-model',
                     required=False,
                     type=str
                     )
 parser.add_argument('--clustering', 
                     required=True, 
-                    choices=["FSD", "agglomerative", "DBSCAN", "spy_fcluster"], 
+                    choices=["FSD", "agglomerative", "DBSCAN", "HDBSCAN", "spy_fcluster"], 
                     help="""
                     A clustering algorithm
                     """
@@ -119,8 +121,14 @@ def test_params(**params):
             y_pred = clustering.incremental_clustering()
         else:
             logging.info("testing other clustering than FSD : {}".format(params["clustering"]))
+            if params["clustering"] == "HDBSCAN":               
+                # clustering = HDBSCAN(cluster_selection_epsilon = t, metric= "seuclidean", min_samples=5).fit(X)     
+                # y_pred = clustering.labels_
+                clusterer = hdbscan.HDBSCAN()
+                clusterer.fit(X)
+                clusterer.labels_
             if params["clustering"] == "DBSCAN":
-                clustering = DBSCAN(eps=t, metric=params["distance"], min_samples=5).fit(X)        
+                clustering = DBSCAN(eps=t, metric=params["distance"], min_samples=5).fit(X)      
                 y_pred = clustering.labels_
             if params["clustering"] == "agglomerative":
                 clustering = AgglomerativeClustering(n_clusters=None, metric= "cosine", linkage = 'average', distance_threshold = t).fit(X)

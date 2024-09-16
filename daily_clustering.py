@@ -72,6 +72,9 @@ parser.add_argument('--clustering',
                     A clustering algorithm :
                     """
                     )
+parser.add_argument('--daily',
+                    required = False
+                    )
 # ADDED : only used in the script, not in commands for now
 parser.add_argument("--global_clustering",
                     required=False) 
